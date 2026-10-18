@@ -5,14 +5,6 @@
 **Supersonic car football, right in your browser.**
 One HTML file. No installs. Works offline.
 
-[!\[Play now](https://img.shields.io/badge/▶\_PLAY\_NOW-f0a23a?style=for-the-badge\&logoColor=black)](https://atcontentmaker.github.io/palakshi-racer/)
-
-!\[Offline](https://img.shields.io/badge/works-offline-2ee6c7?style=flat-square)
-!\[Single file](https://img.shields.io/badge/single-HTML\_file-e7b34a?style=flat-square)
-!\[Three.js](https://img.shields.io/badge/Three.js-000000?style=flat-square\&logo=three.js\&logoColor=white)
-!\[React](https://img.shields.io/badge/React-20232a?style=flat-square\&logo=react\&logoColor=61DAFB)
-!\[License](https://img.shields.io/badge/license-MIT-3c92ff?style=flat-square)
-
 <img src="screenshots/gameplay.png" alt="Palakshi Racer gameplay" width="720">
 
 <p>
