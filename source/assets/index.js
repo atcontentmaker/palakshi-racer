@@ -36920,6 +36920,7 @@ const Bt = {
   phase: "attract",
   matchId: 0,
   mutatorText: "",
+  trainingText: "",
 };
 class v2 {
   ctx = null;
@@ -37372,6 +37373,60 @@ function E2(r) {
           { x: 18, z: 15 },
         ];
 }
+// === FEATURE: TRAINING === Drill definitions and launch presets stay outside physics.
+const TrainingDrills = [
+  { id: "shoot_stationary", title: "Shooting · Stationary", bestLabel: "goals" },
+  { id: "shoot_rolling", title: "Shooting · Rolling", bestLabel: "goals" },
+  { id: "saves", title: "Saves", bestLabel: "saves" },
+  { id: "aerial_easy", title: "Aerial Practice · Easy", bestLabel: "touches" },
+  { id: "aerial_hard", title: "Aerial Practice · Hard", bestLabel: "touches" },
+];
+function trainingText(r) {
+  if (!r) return "";
+  const n = TrainingDrills.find((a) => a.id === r.drill)?.title || "Training";
+  return r.drill === "saves"
+    ? `${n} · ATTEMPT ${r.attempts} · SAVES ${r.saves} · CONCEDED ${r.conceded}`
+    : r.drill.startsWith("aerial_")
+      ? `${n} · ATTEMPT ${r.attempts} · TOUCHES ${r.touches} · GOALS ${r.goals}`
+      : `${n} · ATTEMPT ${r.attempts} · GOALS ${r.goals}`;
+}
+function beginTrainingAttempt(r) {
+  if (!r?.training) return;
+  const t = r.training;
+  zp(r, !1);
+  const n = r.cars.find((a) => a.isPlayer), a = r.ball;
+  if (n) {
+    const l = t.drill.startsWith("shoot_") ? 1 : t.drill === "saves" ? -42 : 6;
+    ((n.x = l), (n.y = ra), (n.z = 0), (n.px = l), (n.py = ra), (n.pz = 0),
+      (n.vx = n.vy = n.vz = 0), (n.yaw = n.pyaw = 0), (n.pitch = n.ppitch = 0),
+      (n.roll = n.proll = 0), (n.lagX = l), (n.lagZ = 0), (n.onGround = !0));
+  }
+  ((a.x = 0), (a.y = r.ballRadius), (a.z = 0), (a.vx = a.vy = a.vz = 0),
+    (a.px = a.x), (a.py = a.y), (a.pz = a.z), (a.spinX = a.spinZ = 0),
+    (a.hitLock = 0), (r.goalLatch = !1), (r.phase = "play"), (r.phaseT = 0),
+    (r.countdown = ""), (t.attempts++), (t.resolved = !1));
+  if (t.drill.startsWith("shoot_")) {
+    const l = 10 + Math.random() * 14, c = (Math.random() - 0.5) * 24;
+    ((a.x = l), (a.z = c), (a.vx = t.drill === "shoot_rolling" ? 2.8 : 0),
+      (a.px = a.x), (a.pz = a.z));
+    n && ((n.x = l - 8), (n.px = n.x), (n.z = c), (n.pz = c), (n.lagX = n.x), (n.lagZ = c));
+  } else if (t.drill === "saves") {
+    const l = t.launchIndex++ % 3,
+      c = l === 0 ? { x: -20, z: -3, y: r.ballRadius, vx: -17, vy: 0, vz: 0 }
+        : l === 1 ? { x: -18, z: 4, y: r.ballRadius + 0.25, vx: -18, vy: 4.8, vz: -1.2 }
+          : { x: -15, z: -5, y: 7, vx: -18, vy: -1.2, vz: 2.4 };
+    Object.assign(a, c);
+    ((a.px = a.x), (a.py = a.y), (a.pz = a.z));
+  } else if (t.drill === "aerial_easy") {
+    Object.assign(a, { x: 10, y: 14, z: 0, vx: 0, vy: -1.2, vz: 0 });
+    ((a.px = a.x), (a.py = a.y), (a.pz = a.z));
+  } else {
+    const l = t.launchIndex++ % 2 ? 1 : -1;
+    Object.assign(a, { x: 15, y: 9, z: 18 * l, vx: 4, vy: 3.5, vz: -3.8 * l });
+    ((a.px = a.x), (a.py = a.y), (a.pz = a.z));
+  }
+  (t.hudText = trainingText(t), (Bt.trainingText = t.hudText));
+}
 function T2(r) {
   const t =
       r.mode === "1v1"
@@ -37468,6 +37523,9 @@ function T2(r) {
       bounce: r.mutators.bouncyBall ? 0.82 : 0.6,
       // === FEATURE: TEAM AI === Coordination is deliberately simulation-local.
       teamAI: { commitLocks: [0, 0], challengeIds: [-1, -1], challengeAge: [0, 0], defenderIds: [-1, -1], defenderHold: [0, 0], rotationIds: [-1, -1], rotationHold: [0, 0] },
+      training: TrainingDrills.some((a) => a.id === r.training?.drill)
+        ? { drill: r.training.drill, attempts: 0, goals: 0, saves: 0, conceded: 0, touches: 0, launchIndex: 0, resolved: !1, hudText: "" }
+        : null,
     };
   return (Cx(_), zp(_, !0), _);
 }
@@ -38303,6 +38361,11 @@ function H2(r, t) {
 function I_(r, t) {
   if (r.goalLatch || r.phase !== "play") return;
   ((r.goalLatch = !0), (r.score[t] += 1));
+  if (r.training) {
+    t === 0 && (r.training.goals += 1);
+    r.training.drill === "saves" && t === 1 && (r.training.conceded += 1);
+    r.training.resolved = !0;
+  }
   const n = r.cars.find((m) => m.id === r.ball.lastId),
     a = r.ball.lastTeam !== -1 && r.ball.lastTeam !== t;
   if (n && !a) {
@@ -38940,6 +39003,7 @@ class Q2 {
       (this.replayCount = 0),
       (this.replayClock = 0),
       (this.replayPlaying = !1),
+      this.sim.training && (beginTrainingAttempt(this.sim), this.updateTraining()),
       this.applyColors(t.palette, t.colorSide),
       this.sim.cars.forEach((n, a) => {
         const l = this.carViews[a];
@@ -38947,7 +39011,7 @@ class Q2 {
       }),
       this.camPos.set(-36, 18, 22),
       this.camLook.set(0, 2, 0),
-      this.hooks.onPhase("countdown", !1),
+      this.hooks.onPhase(this.sim.training ? "play" : "countdown", !1),
       this.publish());
   }
   backToMenu() {
@@ -38960,6 +39024,7 @@ class Q2 {
       (Bt.status = ""),
       (Bt.scoreboard = !1),
       (Bt.mutatorText = ""),
+      (Bt.trainingText = ""),
       this.applyColors(this.previewPalette, this.previewSide),
       this.hooks.onPhase("attract", !1));
   }
@@ -39000,7 +39065,18 @@ class Q2 {
     this.sim && A2(this.sim);
   }
   resetTraining() {
+    if (this.sim?.training) {
+      (beginTrainingAttempt(this.sim), this.clearReplayBuffer(), this.updateTraining(),
+        this.hooks.onPhase("play", this.paused));
+      return;
+    }
     this.sim && w2(this.sim);
+  }
+  updateTraining() {
+    const t = this.sim?.training;
+    if (!t) return;
+    ((t.hudText = trainingText(t)), (Bt.trainingText = t.hudText),
+      this.hooks.onTrainingUpdate?.(t));
   }
   skipReplay() {
     this.sim?.phase === "celebrate" && ((this.sim.phaseT = 999), this.clearReplayBuffer(), (this.replayPlaying = !1));
@@ -39694,9 +39770,11 @@ class Q2 {
     if ((this.pollPad(), this.sim && !this.paused && !this.attract)) {
       const l = y2();
       (q2(this.sim, t, { ...l, jumpEdge: this.jumpEdge || vl.jump }),
-        (this.replayClock += t),
-        this.replayClock >= 1 / 30 &&
-          ((this.replayClock -= 1 / 30), this.captureReplay()),
+        this.sim.training
+          ? (this.replayClock = 0)
+          : ((this.replayClock += t),
+            this.replayClock >= 1 / 30 &&
+              ((this.replayClock -= 1 / 30), this.captureReplay())),
         (this.jumpEdge = !1),
         (vl.jump = !1),
         this.consumeEvents(),
@@ -39755,33 +39833,35 @@ class Q2 {
             this.hooks.onCountdown("GO"),
             this.hooks.onPhase("play", !1),
             cn.tick(!0));
-        else if (n.type === "goal")
-          ((this.replayPlaying =
-            !!t.config.replayEnabled && this.replayCount > 1),
-            (t.config.replaySeconds = this.replayPlaying
-              ? Math.min(5.2, this.replayCount / 30 + 0.8)
-              : 1.85),
-            (this.replayClock = 0),
-            this.hooks.onGoal(n),
-            this.hooks.onPhase("celebrate", this.paused),
-            cn.goal(),
+        else if (n.type === "goal") {
+          const training = !!t.training, bx = t.ball.x, by = t.ball.y, bz = t.ball.z;
+          if (!training) {
+            ((this.replayPlaying =
+              !!t.config.replayEnabled && this.replayCount > 1),
+              (t.config.replaySeconds = this.replayPlaying
+                ? Math.min(5.2, this.replayCount / 30 + 0.8)
+                : 1.85),
+              (this.replayClock = 0));
+          } else this.clearReplayBuffer();
+          this.hooks.onGoal(n);
+          if (!training) this.hooks.onPhase("celebrate", this.paused);
+          (cn.goal(),
             _d([18, 30, 22]),
             (Bt.flash = 0.85),
             (this.shake = Math.min(1.2, this.shake + 0.85)),
-            this.burst(
-              (n.team === 0, t.ball.x),
-              t.ball.y,
-              t.ball.z,
-              n.team === 0 ? 1 : 0,
-              28,
-            ),
-            this.shock(
-              t.ball.x,
-              0.2,
-              t.ball.z,
-              n.team === 0 ? 15770170 : 2017464,
-            ));
-        else if (n.type === "hit")
+            this.burst(bx, by, bz, n.team === 0 ? 1 : 0, 28),
+            this.shock(bx, 0.2, bz, n.team === 0 ? 15770170 : 2017464));
+          if (training) {
+            this.updateTraining();
+            beginTrainingAttempt(t);
+            this.updateTraining();
+            this.hooks.onPhase("play", this.paused);
+          }
+        } else if (n.type === "hit") {
+          if (t.training && n.player && t.training.drill.startsWith("aerial_")) {
+            t.training.touches++;
+            this.updateTraining();
+          }
           (cn.hit(n.power),
             n.player && n.power > 8 && _d(10),
             n.power > 9 &&
@@ -39789,6 +39869,7 @@ class Q2 {
             n.power > 7 &&
               (this.burst(n.x, n.y, n.z, 2, 8 + Math.min(10, n.power)),
               this.shock(n.x, 0.15, n.z, 16769448)));
+        }
         else if (n.type === "shatter") {
           (cn.shatter(),
             _d(28),
@@ -39808,7 +39889,9 @@ class Q2 {
               : n.type === "pad"
                 ? cn.boostPad(n.big)
                 : n.type === "save"
-                  ? (cn.save(), this.hooks.onToast("SAVE", "teal"))
+                  ? (t.training?.drill === "saves" && !t.training.resolved &&
+                      ((t.training.saves++, (t.training.resolved = !0), this.updateTraining())),
+                    cn.save(), this.hooks.onToast("SAVE", "teal"))
                   : n.type === "overtime"
                     ? ((Bt.ot = !0),
                       cn.overtime(),
@@ -39871,9 +39954,10 @@ class Q2 {
     if (
       ((Bt.ballCam = this.ballCam), (Bt.scoreboard = ze.tab || ge.board), !t)
     ) {
-      Bt.phase = "attract";
+      ((Bt.phase = "attract"), (Bt.trainingText = ""));
       return;
     }
+    Bt.trainingText = t.training?.hudText || "";
     const n = t.cars.find((l) => l.isPlayer);
     ((Bt.boost = n?.boost ?? 0),
       (Bt.speed = Math.round(Math.hypot(n?.vx ?? 0, n?.vz ?? 0) * 5.15)),
@@ -40504,6 +40588,9 @@ function iw(r, t, n, a, l, c) {
   return { ...r, mmr: p, results: [g, ...r.results].slice(0, 8) };
 }
 const Lx = "palakshi-racer-features-v1",
+  TrainingBestKey = "palakshi-racer-training-v1",
+  TrainingBestIds = TrainingDrills.map((r) => r.id),
+  defaultTrainingBests = () => Object.fromEntries(TrainingBestIds.map((r) => [r, 0])),
   Ux = [
     "#f0a23a",
     "#e7b34a",
@@ -40575,6 +40662,29 @@ function ow() {
 function lw(r) {
   try {
     localStorage.setItem(Lx, JSON.stringify(r));
+  } catch {}
+}
+function loadTrainingBests() {
+  const r = defaultTrainingBests();
+  try {
+    const t = JSON.parse(localStorage.getItem(TrainingBestKey) || "null");
+    for (const n of TrainingBestIds) {
+      const a = t && Number.isFinite(t[n]) ? Math.floor(t[n]) : 0;
+      r[n] = Math.max(0, Math.min(999999, a));
+    }
+    return r;
+  } catch {
+    return r;
+  }
+}
+function saveTrainingBests(r) {
+  try {
+    const t = defaultTrainingBests();
+    for (const n of TrainingBestIds) {
+      const a = r && Number.isFinite(r[n]) ? Math.floor(r[n]) : 0;
+      t[n] = Math.max(0, Math.min(999999, a));
+    }
+    localStorage.setItem(TrainingBestKey, JSON.stringify(t));
   } catch {}
 }
 function cw(r) {
@@ -40668,7 +40778,8 @@ const fw = te.memo(function ({
     V = te.useRef(null),
     W = te.useRef(null),
     Y = te.useRef(null),
-    $ = te.useRef(null);
+    $ = te.useRef(null),
+    DrillHudRef = te.useRef(null);
   return (
     te.useEffect(() => {
       const X = C.current;
@@ -40705,6 +40816,9 @@ const fw = te.memo(function ({
           V.current?.classList.toggle("is-on", !Bt.muted),
           V.current && (V.current.textContent = Bt.muted ? "Muted" : "Sound"),
           W.current && W.current.classList.toggle("hidden", !Bt.scoreboard));
+        DrillHudRef.current &&
+          ((DrillHudRef.current.textContent = Bt.trainingText),
+          DrillHudRef.current.classList.toggle("hidden", !Bt.trainingText));
         const B = Y.current;
         if (B) {
           const H = B.children;
@@ -40734,6 +40848,11 @@ const fw = te.memo(function ({
       children: [
         z.jsx("div", { ref: L, className: "flash-overlay" }),
         z.jsx("div", { ref: N, className: "streaks" }),
+      z.jsx("div", {
+        ref: DrillHudRef,
+        className: "glass absolute left-1/2 top-[72px] -translate-x-1/2 rounded-full px-3 py-1.5 font-display text-xs tracking-wide text-white/85 hidden",
+        "aria-live": "polite",
+      }),
         z.jsx("div", {
           className:
             "absolute left-3 top-3 flex items-start gap-2 sm:left-5 sm:top-4",
@@ -41244,6 +41363,8 @@ function pw() {
     [P, T] = te.useState("main"),
     [O, V] = te.useState("1v1"),
     [W, Y] = te.useState(0),
+    [trainingBests, setTrainingBests] = te.useState(() => loadTrainingBests()),
+    [trainingProgress, setTrainingProgress] = te.useState(null),
     [$, X] = te.useState({
       mode: "2v2",
       minutes: 2,
@@ -41267,17 +41388,20 @@ function pw() {
       (ft) => {
         (cn.unlock(), cn.ui());
         const At = n.current,
+          training = ft.training && TrainingDrills.some((item) => item.id === ft.training.drill),
           oe = {
             ...ft,
             palette: At.palette,
             playerName: tw(At.name),
             colorSide: At.colorSide,
-              mutators:
-                ft.mode === "freeplay"
+            mutators:
+                training
+                 ? { ...k.mutators, unlimitedBoost: !0 }
+                 : ft.mode === "freeplay"
                  ? { ...k.mutators }
                   : { ...bu().mutators, lowGravity: !1, bigBall: !1, smallBall: !1, bouncyBall: !1, unlimitedBoost: !1, ballSpeed: 1 },
             customization: k.customization,
-            replayEnabled: k.replayEnabled,
+            replayEnabled: training ? !1 : k.replayEnabled,
           };
         (V(oe.mode),
           Y((ne) => ne + 1),
@@ -41287,6 +41411,7 @@ function pw() {
           v(!1),
           T("main"),
           N(""),
+          setTrainingProgress(training ? { drill: ft.training.drill, ...defaultTrainingBests(), attempts: 0, goals: 0, saves: 0, conceded: 0, touches: 0 } : null),
           t.current?.startMatch(oe));
       },
       [k],
@@ -41322,6 +41447,16 @@ function pw() {
         },
         onCountdown: (ne) => E(ne),
         onGoal: (ne) => M(ne),
+        onTrainingUpdate: (ne) => {
+          const score = ne.drill === "saves" ? ne.saves : ne.drill.startsWith("aerial_") ? ne.touches : ne.goals;
+          setTrainingProgress({ ...ne });
+          setTrainingBests((old) => {
+            if (score <= (old[ne.drill] || 0)) return old;
+            const next = { ...old, [ne.drill]: Math.min(999999, score) };
+            saveTrainingBests(next);
+            return next;
+          });
+        },
         onToast: (ne, ae) => U({ id: Date.now(), text: ne, tone: ae }),
         onEnd: (ne) => {
           const ae = n.current;
@@ -41705,6 +41840,12 @@ function pw() {
                               }),
                             children: "Free play",
                           }),
+                          z.jsx("button", {
+                            className: "cta-alt",
+                            type: "button",
+                            onClick: () => T("training"),
+                            children: "Training",
+                          }),
                         ],
                       }),
                       z.jsxs("div", {
@@ -41987,6 +42128,49 @@ function pw() {
                         type: "button",
                         onClick: () => Dt($),
                         children: ["Start ", $.mode, " · ", yd($.difficulty)],
+                      }),
+                    ],
+                  }),
+                P === "training" &&
+                  z.jsxs("div", {
+                    className: "space-y-4",
+                    children: [
+                      z.jsx("button", {
+                        className: "text-sm text-white/60",
+                        type: "button",
+                        onClick: () => T("main"),
+                        children: "← Back",
+                      }),
+                      z.jsx("h2", {
+                        className: "font-display text-2xl",
+                        children: "Training",
+                      }),
+                      z.jsx("p", {
+                        className: "text-sm text-white/55",
+                        children: "Choose a drill. Press R to reset an attempt; pause to return here.",
+                      }),
+                      z.jsx("div", {
+                        className: "grid gap-2",
+                        children: TrainingDrills.map((drill) =>
+                          z.jsxs("button", {
+                            className: "cta-alt flex items-center justify-between gap-4 text-left",
+                            type: "button",
+                            onClick: () => Dt({
+                              mode: "freeplay",
+                              minutes: 5,
+                              difficulty: "pro",
+                              ranked: !1,
+                              training: { drill: drill.id },
+                            }),
+                            children: [
+                              z.jsx("span", { children: drill.title }),
+                              z.jsx("span", {
+                                className: "text-xs text-[#e7b34a]",
+                                children: "BEST " + (trainingBests[drill.id] || 0) + " " + drill.bestLabel,
+                              }),
+                            ],
+                          }, drill.id),
+                        ),
                       }),
                     ],
                   }),
@@ -42353,7 +42537,7 @@ function pw() {
                     className: "cta-alt",
                     type: "button",
                     onClick: () => {
-                      (t.current?.backToMenu(), C(null), T("main"));
+                      (t.current?.backToMenu(), C(null), setTrainingProgress(null), T(trainingProgress ? "training" : "main"));
                     },
                     children: "Exit to menu",
                   }),
