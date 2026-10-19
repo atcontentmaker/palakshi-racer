@@ -37467,55 +37467,113 @@ function T2(r) {
       gravity: r.mutators.lowGravity ? D_ * 0.58 : D_,
       bounce: r.mutators.bouncyBall ? 0.82 : 0.6,
       // === FEATURE: TEAM AI === Coordination is deliberately simulation-local.
-      teamAI: { commitLocks: [0, 0], challengeIds: [-1, -1], defenderIds: [-1, -1], defenderHold: [0, 0] },
+      teamAI: { commitLocks: [0, 0], challengeIds: [-1, -1], challengeAge: [0, 0], defenderIds: [-1, -1], defenderHold: [0, 0], rotationIds: [-1, -1], rotationHold: [0, 0] },
     };
   return (Cx(_), zp(_, !0), _);
 }
 function Cx(r) {
   for (const a of r.cars) a.kickoffTaker = !1;
-  const t = r.cars.find((a) => a.isPlayer);
-  t && (t.kickoffTaker = !0);
-  const n = r.cars.filter((a) => a.team === 1);
-  (n.sort((a, l) => Math.abs(a.spawnZ) - Math.abs(l.spawnZ)),
-    n[0] && (n[0].kickoffTaker = !0));
+  const t = r.cars.find((a) => a.team === 0 && a.isPlayer);
+  if (t) t.kickoffTaker = !0;
+  else {
+    let n = null;
+    for (const a of r.cars)
+      a.team === 0 && (!n || Math.abs(a.spawnZ) < Math.abs(n.spawnZ)) && (n = a);
+    if (n) n.kickoffTaker = !0;
+  }
+  let n = null;
+  for (const a of r.cars)
+    a.team === 1 && (!n || Math.abs(a.spawnZ) < Math.abs(n.spawnZ)) && (n = a);
+  if (n) n.kickoffTaker = !0;
 }
 // === FEATURE: TEAM AI === Keep team coordination isolated from 1v1 steering.
 function AI2(r, t = null) {
   if (r.mode !== "2v2" && r.mode !== "3v3") return;
-  const a = r.teamAI || (r.teamAI = { commitLocks: [0, 0], challengeIds: [-1, -1], defenderIds: [-1, -1], defenderHold: [0, 0] });
+  const a = r.teamAI || (r.teamAI = { commitLocks: [0, 0], challengeIds: [-1, -1], challengeAge: [0, 0], defenderIds: [-1, -1], defenderHold: [0, 0], rotationIds: [-1, -1], rotationHold: [0, 0] });
   for (let l = 0; l < 2; l++) {
     a.commitLocks[l] = Math.max(0, a.commitLocks[l] - (typeof t === "number" ? t : 0));
     a.defenderHold[l] = Math.max(0, a.defenderHold[l] - (typeof t === "number" ? t : 0));
-    const c = r.cars.filter((f) => f.team === l && !f.isPlayer && f.demoT <= 0);
-    const humans = r.cars.filter((f) => f.team === l && f.isPlayer && f.demoT <= 0);
-    if (!c.length) continue;
-    if (t && typeof t === "object" && t.team === l) {
-      a.commitLocks[l] = 0.45;
-      a.challengeIds[l] = -1;
+    a.rotationHold[l] = Math.max(0, a.rotationHold[l] - (typeof t === "number" ? t : 0));
+    if (a.rotationHold[l] <= 0) a.rotationIds[l] = -1;
+    let human = null, botCount = 0;
+    for (const f of r.cars) {
+      if (f.team !== l || f.demoT > 0) continue;
+      if (f.isPlayer) human = f;
+      else botCount++;
     }
-    const human = humans[0];
-    const closestHuman = human && Math.hypot(human.x - r.ball.x, human.z - r.ball.z);
+    if (!botCount) continue;
+    if (t && typeof t === "object" && t.team === l) {
+      a.commitLocks[l] = 0.48;
+      a.challengeIds[l] = -1;
+      if (!t.isPlayer) {
+        a.rotationIds[l] = t.id;
+        a.rotationHold[l] = 1.25;
+      }
+    }
+    const humanDistance = human ? Math.hypot(human.x - r.ball.x, human.z - r.ball.z) : Infinity;
     const attackHalf = l === 0 ? r.ball.x > 0 : r.ball.x < 0;
-    const committed = human && closestHuman < 18;
+    const committed = human && humanDistance < 18;
     const needsDefender = attackHalf || committed;
-    let defender = c.find((f) => f.id === a.defenderIds[l] && f.demoT <= 0);
+    let defender = null;
+    for (const f of r.cars)
+      if (f.team === l && !f.isPlayer && f.demoT <= 0 && f.id === a.defenderIds[l]) {
+        defender = f;
+        break;
+      }
     if (!defender || a.defenderHold[l] <= 0) {
-      defender = c.slice().sort((f, d) => {
-        const goalX = l === 0 ? -52 : wt.halfX;
-        return Math.hypot(f.x - goalX, f.z) - Math.hypot(d.x - goalX, d.z);
-      })[0];
+      defender = null;
+      const goalX = l === 0 ? -52 : wt.halfX;
+      let bestDistance = Infinity;
+      for (const f of r.cars) {
+        if (f.team !== l || f.isPlayer || f.demoT > 0) continue;
+        const distance = Math.hypot(f.x - goalX, f.z);
+        if (distance < bestDistance) (bestDistance = distance), (defender = f);
+      }
       a.defenderIds[l] = defender ? defender.id : -1;
       a.defenderHold[l] = 1.5;
     }
     if (!needsDefender) defender = null;
-    const challengers = c.filter((f) => !defender || f.id !== defender.id);
-    let challenge = challengers.find((f) => f.id === a.challengeIds[l]);
-    if (!challenge || challenge.demoT > 0 || (t && typeof t === "object" && challenge.id === t.id)) {
-      challengers.sort((f, d) => Math.hypot(f.x - r.ball.x, f.z - r.ball.z) - Math.hypot(d.x - r.ball.x, d.z - r.ball.z));
-      challenge = challengers[0];
-      a.challengeIds[l] = challenge ? challenge.id : -1;
+    let challenge = null, nearest = null, challengeDistance = Infinity;
+    for (const f of r.cars) {
+      if (f.team !== l || f.isPlayer || f.demoT > 0 || (defender && f.id === defender.id) ||
+          (a.rotationHold[l] > 0 && f.id === a.rotationIds[l])) continue;
+      const distance = Math.hypot(f.x - r.ball.x, f.z - r.ball.z);
+      if (f.id === a.challengeIds[l]) challenge = f;
+      if (distance < challengeDistance) (challengeDistance = distance), (nearest = f);
     }
-    for (const f of c) f.teamRole = defender && f.id === defender.id ? "defender" : challenge && f.id === challenge.id && a.commitLocks[l] <= 0 ? "challenge" : "support";
+    if (!challenge) challenge = nearest;
+    const previousChallenge = a.challengeIds[l];
+    // A nearby human who is closer owns the challenge; bots spread out instead of double-committing.
+    if (human && humanDistance < 18 && humanDistance <= challengeDistance + 0.75) challenge = null;
+    if (challenge && (challenge.id === a.rotationIds[l] || (defender && challenge.id === defender.id))) challenge = null;
+    if (challenge && typeof t === "number") {
+      a.challengeAge[l] = previousChallenge === challenge.id ? a.challengeAge[l] + t : 0;
+      if (a.challengeAge[l] > 0.65 && Math.hypot(challenge.x - r.ball.x, challenge.z - r.ball.z) < 10) {
+        a.rotationIds[l] = challenge.id;
+        a.rotationHold[l] = 1.05;
+        a.commitLocks[l] = Math.max(a.commitLocks[l], 0.32);
+        challenge = null;
+        a.challengeAge[l] = 0;
+        // The challenger has reached the play and failed to make contact: send them back and promote the next bot.
+        nearest = null;
+        challengeDistance = Infinity;
+        for (const f of r.cars) {
+          if (f.team !== l || f.isPlayer || f.demoT > 0 || (defender && f.id === defender.id) || f.id === a.rotationIds[l]) continue;
+          const distance = Math.hypot(f.x - r.ball.x, f.z - r.ball.z);
+          if (distance < challengeDistance) (challengeDistance = distance), (nearest = f);
+        }
+        challenge = nearest;
+        if (human && humanDistance < 18 && humanDistance <= challengeDistance + 0.75) challenge = null;
+      }
+    } else a.challengeAge[l] = 0;
+    if (!challenge) a.challengeAge[l] = 0;
+    a.challengeIds[l] = challenge ? challenge.id : -1;
+    for (const f of r.cars) {
+      if (f.team !== l || f.isPlayer) continue;
+      f.teamRole = f.demoT > 0 ? "" : defender && f.id === defender.id ? "defender" :
+        a.rotationHold[l] > 0 && f.id === a.rotationIds[l] ? "rotate" :
+        challenge && f.id === challenge.id && a.commitLocks[l] <= 0 ? "challenge" : "support";
+    }
   }
 }
 function Op(r) {
@@ -37559,7 +37617,7 @@ function zp(r, t) {
       t && (n.boost = r.mode === "freeplay" && n.isPlayer && r.config.mutators.unlimitedBoost ? 100 : 40),
       Op(n));
    (Ip(r), (r.goalLatch = !1), (r.sinceKickoff = 0),
-     r.teamAI && ((r.teamAI.commitLocks = [0, 0]), (r.teamAI.challengeIds = [-1, -1]), (r.teamAI.defenderIds = [-1, -1]), (r.teamAI.defenderHold = [0, 0])),
+     r.teamAI && ((r.teamAI.commitLocks = [0, 0]), (r.teamAI.challengeIds = [-1, -1]), (r.teamAI.challengeAge = [0, 0]), (r.teamAI.defenderIds = [-1, -1]), (r.teamAI.defenderHold = [0, 0]), (r.teamAI.rotationIds = [-1, -1]), (r.teamAI.rotationHold = [0, 0])),
      Cx(r));
 }
 function Ip(r) {
@@ -37692,8 +37750,18 @@ function L2(r, t) {
       M = c;
     const x = r.sinceKickoff < 1.55;
     if (x && h.kickoffTaker) ((A = n.x), (M = n.z));
-    else if (x)
+    else if (x) {
       ((A = h.team === 0 ? -16 : 16), (M = Math.sign(h.spawnZ || 1) * 18));
+      if (!h.kickoffTaker && h.boost < 85) {
+        let pad = null, padDistance = Infinity;
+        for (const Q of r.pads) {
+          if (!Q.ready || !Q.big || (h.team === 0 ? Q.x >= 0 : Q.x <= 0)) continue;
+          const distance = Math.hypot(Q.x - h.x, Q.z - h.z);
+          if (distance < padDistance) (padDistance = distance), (pad = Q);
+        }
+        if (pad) ((A = pad.x), (M = pad.z));
+      }
+    }
     else if (h.boost < 24 && p > 20 && !y) {
       let J = null,
         D = 36;
@@ -37720,24 +37788,38 @@ function L2(r, t) {
           ((A = l), (M = c)));
     }
     // Team-role targets are selected before lag smoothing; 1v1 remains unchanged.
-    if (!x && h.teamRole === "defender") {
+    if (!x && h.teamRole === "rotate") {
+      const goalX = h.team === 0 ? -52 : wt.halfX;
+      A = goalX + (h.team === 0 ? 14 : -14);
+      M = sn(n.z * 0.58, -wt.halfZ + 5, wt.halfZ - 5);
+      if (h.boost < 65) {
+        let pad = null, padDistance = Infinity;
+        for (const Q of r.pads) {
+          if (!Q.ready || !Q.big || (h.team === 0 ? Q.x >= 0 : Q.x <= 0)) continue;
+          const distance = Math.hypot(Q.x - h.x, Q.z - h.z);
+          if (distance < padDistance) (padDistance = distance), (pad = Q);
+        }
+        if (pad) ((A = pad.x), (M = pad.z));
+      }
+    } else if (!x && h.teamRole === "defender") {
       const goalX = h.team === 0 ? -52 : wt.halfX;
       A = sn(goalX + (n.x - goalX) * 0.42, h.team === 0 ? -51.5 : 0.5, h.team === 0 ? -0.5 : wt.halfX - 0.5);
-      M = sn(n.z * 0.6, -wt.halfZ + 4, wt.halfZ - 4);
+      const postZ = Math.max(4, wt.goalHalfZ - 1.5);
+      M = sn((n.z >= 0 ? -postZ : postZ) + n.z * 0.18, -wt.halfZ + 4, wt.halfZ - 4);
     } else if (!x && h.teamRole === "support") {
       const challenge = r.cars.find((f) => f.team === h.team && f.teamRole === "challenge" && f.demoT <= 0);
       if (challenge && !(h.boost < 24 && p > 20 && !y))
         A = h.team === 0 ? Math.min(A, challenge.x - 6) : Math.max(A, challenge.x + 6);
     }
     const U = h.team === 0 ? h.x > n.x + 1.2 : h.x < n.x - 1.2;
-    (!x &&
+    (h.teamRole !== "defender" && h.teamRole !== "rotate" && !x &&
       U &&
       Math.abs(n.x - _) < 48 &&
       ((A = _ + (h.team === 0 ? 14 : -14)), (M = n.z * 0.4)),
       ((h.team === 0 && n.x < h.x && n.x > _) ||
         (h.team === 1 && n.x > h.x && n.x < _)) &&
         p < 9 &&
-        !x &&
+        !x && h.teamRole !== "defender" && h.teamRole !== "rotate" &&
         ((M = n.z + (n.z > h.z ? -6 : 6)),
         (A = n.x + (h.team === 0 ? -5 : 5))));
     for (const J of r.cars) {
@@ -37769,6 +37851,7 @@ function L2(r, t) {
       x && h.kickoffTaker && r.difficulty !== "rookie" && (W = h.boost > 4),
       x && !h.kickoffTaker && !h.isPlayer && (W = h.boost > 4),
       !x && h.teamRole === "challenge" && (W = h.boost > 0.4));
+    !x && h.teamRole === "rotate" && h.boost < 65 && (W = h.boost > 0.4);
     const Y = h.x + Math.cos(h.yaw) * 6,
       $ = h.z + Math.sin(h.yaw) * 6;
     (Math.abs(Y) > wt.halfX - 3 || Math.abs($) > wt.halfZ - 3) &&
