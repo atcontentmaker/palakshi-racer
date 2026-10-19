@@ -37723,7 +37723,9 @@ function Dx(r) {
 }
 function R2(r) {
   if (r.mode === "freeplay") {
-    (Ip(r), (r.goalLatch = !1), (r.phase = "play"), (r.phaseT = 0));
+    r.training
+      ? beginTrainingAttempt(r)
+      : (Ip(r), (r.goalLatch = !1), (r.phase = "play"), (r.phaseT = 0));
     return;
   }
   if (r.overtime || (r.timeLeft <= 0 && r.score[0] !== r.score[1])) {
@@ -37776,7 +37778,9 @@ function N2(r, t) {
         r.events.push({ type: "go" })));
   } else if (r.phase === "celebrate") {
     r.phaseT += t;
-    const n = r.mode === "freeplay" ? 0.8 : r.config.replayEnabled ? Math.min(5.2, r.config.replaySeconds ?? 1.85) : 1.85;
+    const n = r.config.replayEnabled
+      ? Math.min(6.1, r.config.replaySeconds ?? 1.85)
+      : r.mode === "freeplay" ? 0.8 : 1.85;
     r.phaseT >= n && R2(r);
   }
 }
@@ -38854,7 +38858,8 @@ class Q2 {
     trailEnabled: !1,
   };
   replayStride = 59;
-  replayFrames = new Float32Array(10620);
+  replayCapacity = 181;
+  replayFrames = new Float32Array(10679);
   replayHead = 0;
   replayCount = 0;
   replayClock = 0;
@@ -39768,19 +39773,24 @@ class Q2 {
   frame(t) {
     if (!this.renderer) return;
     if ((this.pollPad(), this.sim && !this.paused && !this.attract)) {
-      const l = y2();
+      const l = y2(), previousPhase = this.sim.phase;
       (q2(this.sim, t, { ...l, jumpEdge: this.jumpEdge || vl.jump }),
-        this.sim.training
-          ? (this.replayClock = 0)
-          : ((this.replayClock += t),
-            this.replayClock >= 1 / 30 &&
-              ((this.replayClock -= 1 / 30), this.captureReplay())),
+        (this.replayClock += t),
+        this.replayClock >= 1 / 30 &&
+          ((this.replayClock -= 1 / 30), this.captureReplay()),
         (this.jumpEdge = !1),
         (vl.jump = !1),
         this.consumeEvents(),
         this.sim.countdown !== this.lastLabel &&
           this.sim.phase === "countdown" &&
           (this.lastLabel = this.sim.countdown));
+      if (previousPhase === "celebrate" && this.sim && this.sim.phase !== "celebrate") {
+        if (this.sim.training && this.sim.phase === "play") {
+          this.clearReplayBuffer();
+          this.updateTraining();
+        }
+        this.hooks.onPhase(this.sim.phase, this.paused);
+      }
     } else ((this.jumpEdge = !1), (vl.jump = !1));
     (this.publish(),
       this.updateFx(t),
@@ -39834,29 +39844,22 @@ class Q2 {
             this.hooks.onPhase("play", !1),
             cn.tick(!0));
         else if (n.type === "goal") {
-          const training = !!t.training, bx = t.ball.x, by = t.ball.y, bz = t.ball.z;
-          if (!training) {
-            ((this.replayPlaying =
-              !!t.config.replayEnabled && this.replayCount > 1),
-              (t.config.replaySeconds = this.replayPlaying
-                ? Math.min(5.2, this.replayCount / 30 + 0.8)
-                : 1.85),
-              (this.replayClock = 0));
-          } else this.clearReplayBuffer();
+          const bx = t.ball.x, by = t.ball.y, bz = t.ball.z;
+          this.captureReplay(!0);
+          this.replayPlaying = !!t.config.replayEnabled && this.replayCount > 1;
+          t.config.replaySeconds = this.replayPlaying
+            ? this.replayCount / 30 + 0.05
+            : t.mode === "freeplay" ? 0.8 : 1.85;
+          this.replayClock = 0;
+          if (t.training) this.updateTraining();
           this.hooks.onGoal(n);
-          if (!training) this.hooks.onPhase("celebrate", this.paused);
+          this.hooks.onPhase("celebrate", this.paused);
           (cn.goal(),
             _d([18, 30, 22]),
             (Bt.flash = 0.85),
             (this.shake = Math.min(1.2, this.shake + 0.85)),
             this.burst(bx, by, bz, n.team === 0 ? 1 : 0, 28),
             this.shock(bx, 0.2, bz, n.team === 0 ? 15770170 : 2017464));
-          if (training) {
-            this.updateTraining();
-            beginTrainingAttempt(t);
-            this.updateTraining();
-            this.hooks.onPhase("play", this.paused);
-          }
         } else if (n.type === "hit") {
           if (t.training && n.player && t.training.drill.startsWith("aerial_")) {
             t.training.touches++;
@@ -39937,6 +39940,7 @@ class Q2 {
       difficulty: t.difficulty,
       ranked: t.ranked && t.mode !== "freeplay",
       minutes: t.minutes,
+      tournament: t.config.tournament === !0,
       pilots: n,
       mvp: l.name,
       mvpLine:
@@ -40216,9 +40220,9 @@ class Q2 {
         n.phase === "celebrate" &&
         this.renderReplayFrame(n.phaseT));
   }
-  captureReplay() {
+  captureReplay(force = !1) {
     const t = this.sim;
-    if (!t || t.phase !== "play") return;
+    if (!t || (!force && t.phase !== "play")) return;
     const n = this.replayHead * this.replayStride,
       a = t.ball;
     ((this.replayFrames[n] = a.x),
@@ -40239,17 +40243,17 @@ class Q2 {
         (this.replayFrames[f + 7] = c?.supersonic ? 1 : 0),
         (this.replayFrames[f + 8] = c?.demoT > 0 ? 1 : 0));
     }
-    ((this.replayHead = (this.replayHead + 1) % 180),
-      (this.replayCount = Math.min(180, this.replayCount + 1)));
+    ((this.replayHead = (this.replayHead + 1) % this.replayCapacity),
+      (this.replayCount = Math.min(this.replayCapacity, this.replayCount + 1)));
   }
   renderReplayFrame(t) {
     if (!this.replayCount) return;
     const n =
-        this.replayCount === 180
+        this.replayCount === this.replayCapacity
           ? this.replayHead
-          : (this.replayHead + 180 - this.replayCount) % 180,
+          : (this.replayHead + this.replayCapacity - this.replayCount) % this.replayCapacity,
       a = Math.min(this.replayCount - 1, Math.floor(t * 30)),
-      c = ((n + a) % 180) * this.replayStride,
+      c = ((n + a) % this.replayCapacity) * this.replayStride,
       f = this.replayFrames[c],
       h = this.replayFrames[c + 1],
       m = this.replayFrames[c + 2];
@@ -40615,7 +40619,7 @@ const Lx = "palakshi-racer-features-v1",
     trailColor: "#2ee6c7",
     trailEnabled: !1,
   }),
-  rw = () => ({ matches: 0, wins: 0, goals: 0, bestTopSpeed: 0 }),
+  rw = () => ({ matches: 0, wins: 0, goals: 0, bestTopSpeed: 0, tournamentsWon: 0 }),
   bu = () => ({
     replayEnabled: !0,
     customization: sw(),
@@ -40653,6 +40657,7 @@ function ow() {
         wins: Math.max(0, Number(l?.wins) || 0),
         goals: Math.max(0, Number(l?.goals) || 0),
         bestTopSpeed: Math.max(0, Number(l?.bestTopSpeed) || 0),
+        tournamentsWon: Math.max(0, Math.min(999999, Math.floor(Number(l?.tournamentsWon) || 0))),
       },
     };
   } catch {
@@ -40686,6 +40691,118 @@ function saveTrainingBests(r) {
     }
     localStorage.setItem(TrainingBestKey, JSON.stringify(t));
   } catch {}
+}
+// === FEATURE: TOURNAMENT === Persisted bracket helpers; gameplay still uses the normal match simulation.
+const TournamentKey = "palakshi-racer-tournament-v1",
+  TournamentNames = ["Cinder Hawks", "Dune Runners", "Night Circuit", "Copper Comets", "Wild Current", "Glass Wolves", "Sunforge", "Blue Ember"];
+function tournamentStore(r) {
+  try {
+    if (r) localStorage.setItem(TournamentKey, JSON.stringify(r));
+    else localStorage.removeItem(TournamentKey);
+  } catch {}
+}
+function cleanTournament(r) {
+  try {
+    if (!r || r.version !== 1 || !["1v1", "2v2"].includes(r.mode) ||
+        !["active", "playing", "eliminated", "won"].includes(r.status) ||
+        !Number.isSafeInteger(r.seed) || !r.teams || typeof r.teams !== "object" ||
+        Array.isArray(r.teams) ||
+        !Array.isArray(r.rounds) || r.rounds.length !== 3) return null;
+    const teams = {};
+    for (const t of Object.values(r.teams)) {
+      if (!t || typeof t.id !== "string" || !/^(player|bot[1-7])$/.test(t.id) ||
+          typeof t.name !== "string" || t.name.length > 32 ||
+          !Number.isFinite(t.rating) || t.rating < 0 || t.rating > 3) return null;
+      teams[t.id] = { id: t.id, name: t.name, rating: t.rating };
+    }
+    if (!teams.player || Object.keys(teams).length !== 8) return null;
+    const sizes = [4, 2, 1], rounds = r.rounds.map((arr, ri) => {
+      if (!Array.isArray(arr) || arr.length !== sizes[ri]) throw Error();
+      return arr.map((m) => {
+        if (m === null) return null;
+        if (!m || !teams[m.a] || !teams[m.b] || m.a === m.b ||
+            typeof m.played !== "boolean" ||
+            !["rookie", "pro", "palakshi"].includes(m.difficulty)) throw Error();
+        if (m.played && (!Number.isInteger(m.scoreA) || !Number.isInteger(m.scoreB) ||
+            m.scoreA < 0 || m.scoreA > 20 || m.scoreB < 0 || m.scoreB > 20 ||
+            (m.winner !== m.a && m.winner !== m.b))) throw Error();
+        return { a: m.a, b: m.b, played: m.played,
+          scoreA: m.played ? m.scoreA : null, scoreB: m.played ? m.scoreB : null,
+          winner: m.played ? m.winner : null, difficulty: m.difficulty };
+      });
+    });
+    if (!Number.isInteger(r.round) || r.round < 0 || r.round > 2) return null;
+    return { version: 1, mode: r.mode, status: r.status === "playing" ? "active" : r.status,
+      round: r.round, seed: r.seed >>> 0, teams, rounds };
+  } catch { return null; }
+}
+function loadTournament() {
+  try { return cleanTournament(JSON.parse(localStorage.getItem(TournamentKey) || "null")); }
+  catch { return null; }
+}
+function tournamentRandom(r) {
+  let x = r.seed >>> 0;
+  x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+  r.seed = x >>> 0;
+  return r.seed / 4294967296;
+}
+function simulateTournamentMatch(r, m) {
+  const a = r.teams[m.a], b = r.teams[m.b], roll = tournamentRandom(r);
+  let
+    edge = (a.rating - b.rating) * 0.18,
+    scoreA = Math.max(0, Math.min(7, Math.round(2.2 + roll * 2.4 + edge))),
+    scoreB = Math.max(0, Math.min(7, Math.round(2.1 + tournamentRandom(r) * 2.4 - edge)));
+  if (scoreA === scoreB) {
+    if (tournamentRandom(r) < 0.5) scoreA++; else scoreB++;
+  }
+  Object.assign(m, { scoreA, scoreB, winner: scoreA > scoreB ? m.a : m.b, played: !0 });
+}
+function newTournament(mode) {
+  const names = [...TournamentNames];
+  for (let i = names.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1)); [names[i], names[j]] = [names[j], names[i]];
+  }
+  const teams = { player: { id: "player", name: "YOU", rating: 1 } };
+  for (let i = 1; i <= 7; i++) teams["bot" + i] = {
+    id: "bot" + i, name: names[i - 1], rating: 0.45 + Math.random() * 1.9,
+  };
+  const r = { version: 1, mode, status: "active", round: 0,
+    seed: (Math.random() * 4294967295) >>> 0, teams, rounds: [
+      [
+        { a: "player", b: "bot1", played: !1, scoreA: null, scoreB: null, winner: null, difficulty: "rookie" },
+        { a: "bot2", b: "bot3", played: !1, scoreA: null, scoreB: null, winner: null, difficulty: "pro" },
+        { a: "bot4", b: "bot5", played: !1, scoreA: null, scoreB: null, winner: null, difficulty: "pro" },
+        { a: "bot6", b: "bot7", played: !1, scoreA: null, scoreB: null, winner: null, difficulty: "pro" },
+      ], [null, null], [null],
+    ] };
+  for (let i = 1; i < 4; i++) simulateTournamentMatch(r, r.rounds[0][i]);
+  return r;
+}
+function recordTournamentMatch(r, result) {
+  if (!r || !result?.tournament || r.status !== "playing") return r;
+  const m = r.rounds[r.round]?.[0];
+  if (!m || m.played) return r;
+  Object.assign(m, { scoreA: result.score[0], scoreB: result.score[1],
+    winner: result.win ? m.a : m.b, played: !0 });
+  if (!result.win) { r.status = "eliminated"; return r; }
+  if (r.round === 2) { r.status = "won"; return r; }
+  const winners = r.rounds[r.round].map((item) => item.winner);
+  r.round++;
+  const difficulty = r.round === 1 ? "pro" : "palakshi";
+  const first = { a: winners[0], b: winners[1], played: !1, scoreA: null, scoreB: null, winner: null, difficulty };
+  const second = { a: winners[2], b: winners[3], played: !1, scoreA: null, scoreB: null, winner: null, difficulty: "pro" };
+  r.rounds[r.round] = r.round === 1 ? [first, second] : [first];
+  if (r.round === 1) simulateTournamentMatch(r, second);
+  r.status = "active";
+  return r;
+}
+function retryTournamentRound(r) {
+  if (!r || r.status !== "eliminated") return r;
+  const m = r.rounds[r.round]?.[0];
+  if (!m) return r;
+  Object.assign(m, { played: !1, scoreA: null, scoreB: null, winner: null });
+  r.status = "active";
+  return r;
 }
 function cw(r) {
   if (!r) return;
@@ -41365,6 +41482,10 @@ function pw() {
     [W, Y] = te.useState(0),
     [trainingBests, setTrainingBests] = te.useState(() => loadTrainingBests()),
     [trainingProgress, setTrainingProgress] = te.useState(null),
+    [tournament, setTournament] = te.useState(() => loadTournament()),
+    [tournamentMode, setTournamentMode] = te.useState("1v1"),
+    [victoryCelebration, setVictoryCelebration] = te.useState(!1),
+    [victorySeconds, setVictorySeconds] = te.useState(10),
     [$, X] = te.useState({
       mode: "2v2",
       minutes: 2,
@@ -41375,8 +41496,9 @@ function pw() {
     [H, rt] = te.useState(() => window.matchMedia("(pointer: coarse)").matches),
     nt = te.useRef(p),
     J = te.useRef(P),
-    D = te.useRef(k);
-  ((nt.current = p), (J.current = P), (n.current = a), (D.current = k));
+    D = te.useRef(k),
+    tournamentRef = te.useRef(tournament);
+  ((nt.current = p), (J.current = P), (n.current = a), (D.current = k), (tournamentRef.current = tournament));
   const Q = a.touchControls === "on" || (a.touchControls === "auto" && H),
     at = te.useCallback((ft) => {
       ((n.current = ft), l(ft), $2(ft));
@@ -41401,7 +41523,7 @@ function pw() {
                  ? { ...k.mutators }
                   : { ...bu().mutators, lowGravity: !1, bigBall: !1, smallBall: !1, bouncyBall: !1, unlimitedBoost: !1, ballSpeed: 1 },
             customization: k.customization,
-            replayEnabled: training ? !1 : k.replayEnabled,
+            replayEnabled: k.replayEnabled,
           };
         (V(oe.mode),
           Y((ne) => ne + 1),
@@ -41417,6 +41539,14 @@ function pw() {
       [k],
     ),
     Vt = te.useRef(Dt);
+  const startTournamentMatch = (tour = tournamentRef.current) => {
+    if (!tour || tour.status === "won" || tour.status === "eliminated") return;
+    const match = tour.rounds[tour.round]?.[0];
+    if (!match || match.played) return;
+    const next = { ...tour, status: "playing" };
+    (tournamentRef.current = next, setTournament(next), tournamentStore(next),
+      Dt({ mode: next.mode, minutes: 2, difficulty: match.difficulty, ranked: !1, tournament: !0 }));
+  };
   ((Vt.current = Dt),
     te.useEffect(() => {
       const ft = () => rt(!0),
@@ -41460,7 +41590,31 @@ function pw() {
         onToast: (ne, ae) => U({ id: Date.now(), text: ne, tone: ae }),
         onEnd: (ne) => {
           const ae = n.current;
-          if (ne.mode !== "freeplay") {
+          let tournamentWon = !1;
+          if (ne.tournament) {
+            const current = tournamentRef.current;
+            if (current) {
+              const next = JSON.parse(JSON.stringify(current)), priorStatus = next.status;
+              recordTournamentMatch(next, ne);
+              tournamentWon = priorStatus !== "won" && next.status === "won";
+              (tournamentRef.current = next, setTournament(next), tournamentStore(next));
+              if (tournamentWon) {
+                const newMmr = Math.max(0, Number(ae.mmr) || 0) + 99;
+                at({
+                  ...ae,
+                  mmr: newMmr,
+                  results: [{
+                    win: !0, score: "CHAMPION", delta: 99, mmr: newMmr,
+                    mode: "TOURNAMENT", diff: "palakshi", at: Date.now(),
+                  }, ...(Array.isArray(ae.results) ? ae.results : [])].slice(0, 8),
+                });
+                (setVictorySeconds(10), setVictoryCelebration(!0));
+              }
+              N(tournamentWon ? "Tournament champion · +99 MMR" :
+                next.status === "eliminated" ? "Eliminated from tournament" :
+                  "Round " + (next.round + 1) + " complete");
+            }
+          } else if (ne.mode !== "freeplay") {
             const Ee = iw(
                 ae,
                 ne.win,
@@ -41490,6 +41644,7 @@ function pw() {
                 de.career.bestTopSpeed,
                 ne.player.topSpeed,
               ),
+              tournamentsWon: de.career.tournamentsWon + (tournamentWon ? 1 : 0),
             },
           }),
             C(ne),
@@ -41558,7 +41713,17 @@ function pw() {
       if (!x) return;
       const ft = window.setTimeout(() => U(null), 1600);
       return () => window.clearTimeout(ft);
-    }, [x]));
+    }, [x]),
+    te.useEffect(() => {
+      if (!victoryCelebration) return;
+      const started = Date.now();
+      const timer = window.setInterval(() => {
+        const remaining = Math.max(0, 10 - (Date.now() - started) / 1000);
+        setVictorySeconds(remaining);
+        if (remaining <= 0) setVictoryCelebration(!1);
+      }, 100);
+      return () => window.clearInterval(timer);
+    }, [victoryCelebration]));
   const st = Mu(a.palette, a.colorSide),
     xt = p === "countdown" || p === "play" || p === "celebrate",
     Rt = Sd[W % Sd.length] ?? Sd[0];
@@ -41846,6 +42011,12 @@ function pw() {
                             onClick: () => T("training"),
                             children: "Training",
                           }),
+                          z.jsx("button", {
+                            className: "cta-alt",
+                            type: "button",
+                            onClick: () => T("tournament"),
+                            children: "Tournament",
+                          }),
                         ],
                       }),
                       z.jsxs("div", {
@@ -42004,7 +42175,7 @@ function pw() {
                           }),
                           z.jsxs("div", {
                             className:
-                              "mt-2 grid grid-cols-4 gap-2 text-center",
+                              "mt-2 grid grid-cols-2 gap-2 text-center sm:grid-cols-5",
                             children: [
                               z.jsx(xs, { n: k.career.matches, l: "Matches" }),
                               z.jsx(xs, { n: k.career.wins, l: "Wins" }),
@@ -42013,6 +42184,7 @@ function pw() {
                                 n: k.career.bestTopSpeed,
                                 l: "Best SPD",
                               }),
+                              z.jsx(xs, { n: k.career.tournamentsWon || 0, l: "Tournaments" }),
                             ],
                           }),
                         ],
@@ -42129,6 +42301,160 @@ function pw() {
                         onClick: () => Dt($),
                         children: ["Start ", $.mode, " · ", yd($.difficulty)],
                       }),
+                    ],
+                  }),
+                P === "tournament" &&
+                  z.jsxs("div", {
+                    className: "space-y-4",
+                    children: [
+                      z.jsx("button", {
+                        className: "text-sm text-white/60",
+                        type: "button",
+                        onClick: () => T("main"),
+                        children: "← Back",
+                      }),
+                      z.jsx("h2", {
+                        className: "font-display text-2xl",
+                        children: "Tournament",
+                      }),
+                      !tournament &&
+                        z.jsxs("div", {
+                          className: "space-y-4",
+                          children: [
+                            z.jsx("p", {
+                              className: "text-sm text-white/60",
+                              children: "Eight teams. Three knockout rounds. The final opponent is Palakshi level.",
+                            }),
+                            z.jsxs("div", {
+                              className: "flex flex-wrap gap-2",
+                              children: ["1v1", "2v2"].map((mode) =>
+                                z.jsx("button", {
+                                  className: "seg " + (tournamentMode === mode ? "on" : "bg-white/5"),
+                                  type: "button",
+                                  onClick: () => setTournamentMode(mode),
+                                  children: mode,
+                                }, mode),
+                              ),
+                            }),
+                            z.jsx("button", {
+                              className: "cta w-full",
+                              type: "button",
+                              onClick: () => {
+                                const next = newTournament(tournamentMode);
+                                (tournamentRef.current = next, setTournament(next), tournamentStore(next));
+                              },
+                              children: "Start new tournament",
+                            }),
+                          ],
+                        }),
+                      tournament &&
+                        z.jsxs("div", {
+                          className: "space-y-4",
+                          children: [
+                            z.jsxs("div", {
+                              className: "text-sm text-white/60",
+                              children: ["FORMAT · ", tournament.mode, " · ", tournament.status.toUpperCase()],
+                            }),
+                            z.jsxs("div", {
+                              className: "grid gap-3 md:grid-cols-3",
+                              children: ["Quarterfinals", "Semifinals", "Final"].map((roundName, ri) =>
+                                z.jsxs("section", {
+                                  className: "rounded-2xl border border-white/10 bg-black/20 p-3",
+                                  children: [
+                                    z.jsx("div", {
+                                      className: "mb-2 text-[10px] tracking-[0.18em] text-[#e7b34a]",
+                                      children: roundName,
+                                    }),
+                                    (tournament.rounds[ri] || []).map((match, mi) => {
+                                      if (!match) return z.jsx("div", {
+                                        className: "border-t border-white/5 py-2 text-xs text-white/30",
+                                        children: "Match pending",
+                                      }, mi);
+                                      const ta = tournament.teams[match.a], tb = tournament.teams[match.b];
+                                      return z.jsxs("div", {
+                                        className: "border-t border-white/5 py-2 text-xs",
+                                        children: [
+                                          z.jsxs("div", {
+                                            className: "flex justify-between gap-2",
+                                            children: [
+                                              z.jsx("span", { className: match.winner === match.a ? "text-[#2ee6c7]" : "text-white/75", children: ta.name }),
+                                              z.jsx("span", { children: match.played ? match.scoreA : "—" }),
+                                            ],
+                                          }),
+                                          z.jsxs("div", {
+                                            className: "flex justify-between gap-2",
+                                            children: [
+                                              z.jsx("span", { className: match.winner === match.b ? "text-[#2ee6c7]" : "text-white/75", children: tb.name }),
+                                              z.jsx("span", { children: match.played ? match.scoreB : "—" }),
+                                            ],
+                                          }),
+                                        ],
+                                      }, mi);
+                                    }),
+                                  ],
+                                }, roundName),
+                              ),
+                            }),
+                            tournament.status === "active" &&
+                              tournament.rounds[tournament.round]?.[0] &&
+                              z.jsxs("p", {
+                                className: "text-sm text-[#2ee6c7]",
+                                children: [
+                                  "Next opponent: ",
+                                  tournament.teams[tournament.rounds[tournament.round][0].b]?.name || "Opponent",
+                                  " · ",
+                                  yd(tournament.rounds[tournament.round][0].difficulty),
+                                ],
+                              }),
+                            tournament.status === "won" &&
+                              z.jsx("div", {
+                                className: "font-display text-xl text-[#e7b34a]",
+                                children: "TOURNAMENT CHAMPION",
+                              }),
+                            tournament.status === "eliminated" &&
+                              z.jsx("div", {
+                                className: "text-sm text-[#ffb4b4]",
+                                children: "You were eliminated. Retry this round or start a new tournament.",
+                              }),
+                            z.jsxs("div", {
+                              className: "grid gap-2 sm:grid-cols-2",
+                              children: [
+                                tournament.status === "active" && z.jsx("button", {
+                                  className: "cta",
+                                  type: "button",
+                                  onClick: () => startTournamentMatch(),
+                                  children: "Continue",
+                                }),
+                                tournament.status === "eliminated" && z.jsx("button", {
+                                  className: "cta",
+                                  type: "button",
+                                  onClick: () => {
+                                    const next = retryTournamentRound(JSON.parse(JSON.stringify(tournament)));
+                                    (tournamentRef.current = next, setTournament(next), tournamentStore(next), startTournamentMatch(next));
+                                  },
+                                  children: "Retry round",
+                                }),
+                                tournament.status === "won" && z.jsx("button", {
+                                  className: "cta-alt",
+                                  type: "button",
+                                  onClick: () => {
+                                    (tournamentRef.current = null, setTournament(null), tournamentStore(null));
+                                  },
+                                  children: "New tournament",
+                                }),
+                                tournament.status !== "won" && z.jsx("button", {
+                                  className: "cta-alt",
+                                  type: "button",
+                                  onClick: () => {
+                                    if (!window.confirm("Abandon this tournament and clear its bracket?")) return;
+                                    (tournamentRef.current = null, setTournament(null), tournamentStore(null));
+                                  },
+                                  children: "Abandon tournament",
+                                }),
+                              ],
+                            }),
+                          ],
+                        }),
                     ],
                   }),
                 P === "training" &&
@@ -42572,7 +42898,9 @@ function pw() {
               z.jsx("h2", {
                 className: "font-display text-5xl",
                 style: { color: F.win ? "#e7b34a" : "#ffb4b4" },
-                children: F.win ? "VICTORY" : "DEFEAT",
+                children: F.tournament && tournament?.status === "won"
+                  ? "TOURNAMENT CHAMPION"
+                  : F.win ? "VICTORY" : "DEFEAT",
               }),
               z.jsxs("div", {
                 className: "mt-2 font-display text-4xl",
@@ -42669,30 +42997,125 @@ function pw() {
               z.jsxs("div", {
                 className: "mt-5 grid gap-2 sm:grid-cols-2",
                 children: [
-                  z.jsx("button", {
-                    className: "cta",
-                    type: "button",
-                    onClick: () =>
-                      Dt({
-                        mode: F.mode === "freeplay" ? "1v1" : F.mode,
-                        minutes: F.minutes,
-                        difficulty: F.difficulty,
-                        ranked: F.ranked,
+                  F.tournament
+                    ? tournament?.status === "active"
+                      ? z.jsx("button", {
+                          className: "cta",
+                          type: "button",
+                          onClick: () => startTournamentMatch(),
+                          children: "Continue tournament",
+                        })
+                      : tournament?.status === "eliminated"
+                        ? z.jsx("button", {
+                            className: "cta",
+                            type: "button",
+                            onClick: () => {
+                              const next = retryTournamentRound(JSON.parse(JSON.stringify(tournament)));
+                              (tournamentRef.current = next, setTournament(next), tournamentStore(next),
+                                t.current?.backToMenu(), C(null), startTournamentMatch(next));
+                            },
+                            children: "Retry round",
+                          })
+                        : z.jsx("button", {
+                            className: "cta",
+                            type: "button",
+                            onClick: () => {
+                              (t.current?.backToMenu(), C(null), T("tournament"));
+                            },
+                            children: "Tournament bracket",
+                          })
+                    : z.jsx("button", {
+                        className: "cta",
+                        type: "button",
+                        onClick: () =>
+                          Dt({
+                            mode: F.mode === "freeplay" ? "1v1" : F.mode,
+                            minutes: F.minutes,
+                            difficulty: F.difficulty,
+                            ranked: F.ranked,
+                          }),
+                        children: "Rematch",
                       }),
-                    children: "Rematch",
-                  }),
-                  z.jsx("button", {
-                    className: "cta-alt",
-                    type: "button",
-                    onClick: () => {
-                      (t.current?.backToMenu(), C(null), T("main"));
-                    },
-                    children: "Menu",
-                  }),
+                  F.tournament && (tournament?.status === "won" || tournament?.status === "eliminated")
+                    ? z.jsx("button", {
+                        className: "cta-alt",
+                        type: "button",
+                        onClick: () => {
+                          (t.current?.backToMenu(), C(null), T("tournament"));
+                          if (tournament?.status === "won") {
+                            (tournamentRef.current = null, setTournament(null), tournamentStore(null));
+                          }
+                        },
+                        children: tournament?.status === "won" ? "New tournament" : "Tournament bracket",
+                      })
+                    : z.jsx("button", {
+                        className: "cta-alt",
+                        type: "button",
+                        onClick: () => {
+                          (t.current?.backToMenu(), C(null), T("main"));
+                        },
+                        children: "Menu",
+                      }),
                 ],
               }),
             ],
           }),
+        }),
+      victoryCelebration &&
+        z.jsxs("div", {
+          className: "absolute inset-0 z-50 grid place-items-center bg-[#05070d]/90 p-4",
+          role: "dialog",
+          "aria-modal": !0,
+          children: [
+            z.jsx("style", {
+              children: "@keyframes cup-rise{0%{transform:translateY(20px) scale(.72);filter:drop-shadow(0 0 0 #e7b34a)}65%{transform:translateY(-7px) scale(1.08);filter:drop-shadow(0 0 28px #e7b34a)}100%{transform:translateY(0) scale(1);filter:drop-shadow(0 0 14px #e7b34a)}}@keyframes win-shine{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1.12)}}",
+            }),
+            z.jsxs("div", {
+              className: "glass relative w-full max-w-lg overflow-hidden rounded-3xl border border-[#e7b34a]/40 p-8 text-center",
+              children: [
+                z.jsx("div", {
+                  className: "pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(231,179,74,0.18),transparent_65%)]",
+                }),
+                z.jsx("div", {
+                  className: "relative mx-auto mb-4 text-7xl",
+                  style: { animation: "cup-rise 1.15s cubic-bezier(.2,.8,.2,1) both" },
+                  children: "🏆",
+                }),
+                z.jsx("div", {
+                  className: "relative text-[10px] tracking-[0.32em] text-[#2ee6c7]",
+                  children: "PALAKSHI TOURNAMENT",
+                }),
+                z.jsx("h1", {
+                  className: "relative mt-2 font-display text-4xl text-[#e7b34a] sm:text-5xl",
+                  style: { animation: "win-shine 1.8s ease-in-out infinite" },
+                  children: "CHAMPION",
+                }),
+                z.jsx("p", {
+                  className: "relative mt-3 text-lg text-white/80",
+                  children: "Victory secured · +99 MMR",
+                }),
+                z.jsxs("div", {
+                  className: "relative mx-auto mt-6 h-1.5 max-w-xs overflow-hidden rounded-full bg-white/10",
+                  children: [
+                    z.jsx("div", {
+                      className: "h-full bg-[#e7b34a] transition-[width] duration-100",
+                      style: { width: Math.max(0, Math.min(100, victorySeconds * 10)) + "%" },
+                    }),
+                  ],
+                }),
+                z.jsx("p", {
+                  className: "relative mt-2 text-xs text-white/45",
+                  children: Math.ceil(victorySeconds) + "s",
+                }),
+                z.jsx("button", {
+                  className: "cta relative mt-5 min-w-32",
+                  type: "button",
+                  onClick: () => setVictoryCelebration(!1),
+                  children: "Skip",
+                }),
+              ],
+            }),
+          ],
         }),
     ],
   });
